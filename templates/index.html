@@ -3,36 +3,46 @@
 <head>
     <meta charset="UTF-8">
     <title>App de Pronósticos</title>
+
+    <!-- CSS -->
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 
 <body>
 
-<h1>Aplicación de Pronósticos</h1>
+<h1>📊 App de Pronósticos</h1>
 
+<!-- CARGAR ARCHIVO -->
 <input type="file" id="fileInput">
 <button onclick="uploadFile()">Cargar CSV</button>
 
 <br><br>
 
+<!-- PARAMETRO N -->
 <label>N (Promedio móvil):</label>
 <input type="number" id="nValue" value="3">
 <button onclick="runForecast()">Ejecutar</button>
 
+<!-- RESULTADOS -->
 <div id="results"></div>
 
-<div id="charts"></div>
+<!-- GRÁFICO -->
+<canvas id="myChart"></canvas>
 
+<!-- LIBRERÍA CHART -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
 <script>
-console.log("JS funcionando");
+let chart = null;
 
+// -----------------------------
+// SUBIR ARCHIVO
+// -----------------------------
 function uploadFile() {
     let file = document.getElementById("fileInput").files[0];
 
     if (!file) {
-        alert("Selecciona un archivo");
+        alert("Selecciona un archivo primero");
         return;
     }
 
@@ -47,16 +57,23 @@ function uploadFile() {
     .then(data => {
         alert(data.message);
     })
-    .catch(err => console.error(err));
+    .catch(error => {
+        console.error("Error:", error);
+    });
 }
 
+// -----------------------------
+// EJECUTAR PRONÓSTICO
+// -----------------------------
 function runForecast() {
     let n = document.getElementById("nValue").value;
 
     fetch("/forecast", {
         method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({n: n})
+        headers: {
+            "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ n: n })
     })
     .then(res => res.json())
     .then(data => {
@@ -66,54 +83,56 @@ function runForecast() {
             return;
         }
 
-        let html = "";
-        let chartsHTML = "";
-
-        for (let product in data) {
-
-            html += `<h2>${product}</h2>`;
-            html += `<p>MAE: ${data[product].errors.MAE}</p>`;
-            html += `<p>MSE: ${data[product].errors.MSE}</p>`;
-            html += `<p>MAPE: ${data[product].errors.MAPE}%</p>`;
-
-            chartsHTML += `<canvas id="chart_${product}"></canvas>`;
-        }
+        // Mostrar métricas
+        let html = `
+            <h2>Resultados</h2>
+            <p>MAPE: ${data.errors.MAPE}</p>
+            <p>MAPE': ${data.errors.MAPE_prima}</p>
+            <p>MSE: ${data.errors.MSE}</p>
+            <p>MAE: ${data.errors.MAE}</p>
+            <p>RMSE: ${data.errors.RMSE}</p>
+        `;
 
         document.getElementById("results").innerHTML = html;
-        document.getElementById("charts").innerHTML = chartsHTML;
 
-        for (let product in data) {
-            drawChart(
-                `chart_${product}`,
-                data[product].real,
-                data[product].forecast,
-                product
-            );
-        }
+        // Dibujar gráfico
+        drawChart(data.real, data.forecast);
     })
-    .catch(err => console.error(err));
+    .catch(error => {
+        console.error("Error:", error);
+    });
 }
 
-function drawChart(canvasId, real, forecast, label) {
+// -----------------------------
+// GRAFICAR
+// -----------------------------
+function drawChart(real, forecast) {
 
-    const ctx = document.getElementById(canvasId).getContext("2d");
+    const ctx = document.getElementById("myChart").getContext("2d");
 
     let labels = real.map((_, i) => i + 1);
     let cleanForecast = forecast.map(v => v === "" ? null : v);
 
-    new Chart(ctx, {
+    // destruir gráfico anterior
+    if (chart) {
+        chart.destroy();
+    }
+
+    chart = new Chart(ctx, {
         type: "line",
         data: {
             labels: labels,
             datasets: [
                 {
-                    label: "Histórico",
-                    data: real
+                    label: "Datos históricos",
+                    data: real,
+                    borderWidth: 2
                 },
                 {
-                    label: "Pronóstico",
+                    label: "Pronóstico (Promedio móvil)",
                     data: cleanForecast,
-                    borderDash: [5, 5]
+                    borderDash: [5, 5],
+                    borderWidth: 2
                 }
             ]
         }

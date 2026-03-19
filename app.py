@@ -13,21 +13,40 @@ if not os.path.exists(UPLOAD_FOLDER):
 data = None
 
 # -----------------------------
-def moving_average(series, n):
-    return series.rolling(window=n).mean()
-
+# FUNCIÓN DE PRONÓSTICO
 # -----------------------------
-def error_metrics(real, forecast):
-    df = pd.DataFrame({"real": real, "forecast": forecast}).dropna()
-    
-    mae = (abs(df["real"] - df["forecast"])).mean()
-    mse = ((df["real"] - df["forecast"])**2).mean()
-    mape = (abs((df["real"] - df["forecast"]) / df["real"])).mean() * 100
-    
+def pronosticar(N):
+
+    global data
+
+    df = data.copy()
+
+    df["pronostico"] = df["ventas"].rolling(window=N).mean().shift(1)
+
+    df["Error"] = df["pronostico"] - df["ventas"]
+    df["Error_abs"] = df["Error"].abs()
+
+    df["APE"] = df["Error_abs"] / df["ventas"].replace(0, 1)
+    df["APE_prima"] = df["Error_abs"] / df["pronostico"].replace(0, 1)
+
+    df["error_cuadrado"] = df["Error"] ** 2
+
+    MAPE = df["APE"].mean()
+    MAPE_prima = df["APE_prima"].mean()
+    MSE = df["error_cuadrado"].mean()
+    MAE = df["Error_abs"].mean()
+    RMSE = MSE ** 0.5
+
     return {
-        "MAE": round(mae, 2),
-        "MSE": round(mse, 2),
-        "MAPE": round(mape, 2)
+        "real": df["ventas"].tolist(),
+        "forecast": df["pronostico"].fillna("").tolist(),
+        "errors": {
+            "MAPE": round(MAPE, 4),
+            "MAPE_prima": round(MAPE_prima, 4),
+            "MSE": round(MSE, 4),
+            "MAE": round(MAE, 4),
+            "RMSE": round(RMSE, 4)
+        }
     }
 
 # -----------------------------
@@ -54,22 +73,13 @@ def forecast():
     global data
 
     if data is None:
-        return jsonify({"error": "No hay datos cargados"})
+        return jsonify({"error": "Primero carga un archivo"})
 
     n = int(request.json["n"])
-    results = {}
 
-    for col in data.columns[1:]:
-        forecast = moving_average(data[col], n)
-        errors = error_metrics(data[col], forecast)
+    result = pronosticar(n)
 
-        results[col] = {
-            "real": data[col].tolist(),
-            "forecast": forecast.fillna("").tolist(),
-            "errors": errors
-        }
-
-    return jsonify(results)
+    return jsonify(result)
 
 # -----------------------------
 if __name__ == "__main__":
