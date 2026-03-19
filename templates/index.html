@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>App de Pronósticos</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+
+<body>
+
+<h1>Aplicación de Pronósticos</h1>
+
+<input type="file" id="fileInput">
+<button onclick="uploadFile()">Cargar CSV</button>
+
+<br><br>
+
+<label>N (Promedio móvil):</label>
+<input type="number" id="nValue" value="3">
+<button onclick="runForecast()">Ejecutar</button>
+
+<div id="results"></div>
+
+<div id="charts"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<script>
+console.log("JS funcionando");
+
+function uploadFile() {
+    let file = document.getElementById("fileInput").files[0];
+
+    if (!file) {
+        alert("Selecciona un archivo");
+        return;
+    }
+
+    let formData = new FormData();
+    formData.append("file", file);
+
+    fetch("/upload", {
+        method: "POST",
+        body: formData
+    })
+    .then(res => res.json())
+    .then(data => {
+        alert(data.message);
+    })
+    .catch(err => console.error(err));
+}
+
+function runForecast() {
+    let n = document.getElementById("nValue").value;
+
+    fetch("/forecast", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({n: n})
+    })
+    .then(res => res.json())
+    .then(data => {
+
+        if (data.error) {
+            alert(data.error);
+            return;
+        }
+
+        let html = "";
+        let chartsHTML = "";
+
+        for (let product in data) {
+
+            html += `<h2>${product}</h2>`;
+            html += `<p>MAE: ${data[product].errors.MAE}</p>`;
+            html += `<p>MSE: ${data[product].errors.MSE}</p>`;
+            html += `<p>MAPE: ${data[product].errors.MAPE}%</p>`;
+
+            chartsHTML += `<canvas id="chart_${product}"></canvas>`;
+        }
+
+        document.getElementById("results").innerHTML = html;
+        document.getElementById("charts").innerHTML = chartsHTML;
+
+        for (let product in data) {
+            drawChart(
+                `chart_${product}`,
+                data[product].real,
+                data[product].forecast,
+                product
+            );
+        }
+    })
+    .catch(err => console.error(err));
+}
+
+function drawChart(canvasId, real, forecast, label) {
+
+    const ctx = document.getElementById(canvasId).getContext("2d");
+
+    let labels = real.map((_, i) => i + 1);
+    let cleanForecast = forecast.map(v => v === "" ? null : v);
+
+    new Chart(ctx, {
+        type: "line",
+        data: {
+            labels: labels,
+            datasets: [
+                {
+                    label: "Histórico",
+                    data: real
+                },
+                {
+                    label: "Pronóstico",
+                    data: cleanForecast,
+                    borderDash: [5, 5]
+                }
+            ]
+        }
+    });
+}
+</script>
+
+</body>
+</html>
