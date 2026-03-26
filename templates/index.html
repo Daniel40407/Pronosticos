@@ -1,144 +1,975 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-    <meta charset="UTF-8">
-    <title>App de Pronósticos</title>
-
-    <!-- CSS -->
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pronósticos</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
-
 <body>
 
-<h1>📊 App de Pronósticos</h1>
+<!-- TOP BAR -->
+<div class="topbar">
+  <div class="logo">
+    <div class="logo-icon">
+      <svg viewBox="0 0 16 16" fill="none">
+        <polyline points="1,12 5,7 8,10 11,4 15,6" stroke="#0e0f11" stroke-width="2.2"
+                  stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </div>
+    Pronósticos
+  </div>
+  <div class="topbar-right">
+    <div class="status-badge" id="statusBadge">
+      <span class="dot"></span> Sin datos
+    </div>
+  </div>
+</div>
 
-<!-- CARGAR ARCHIVO -->
-<input type="file" id="fileInput">
-<button onclick="uploadFile()">Cargar CSV</button>
+<!-- ── MODAL: CONFIGURAR COLUMNAS ── -->
+<div id="colModal" class="modal-overlay" style="display:none;">
+  <div class="modal-box">
+    <div class="modal-header">
+      <div>
+        <div class="modal-title">Configurar columnas del CSV</div>
+        <div class="modal-sub" id="modalSub">—</div>
+      </div>
+    </div>
 
-<br><br>
+    <!-- PREVIEW TABLE -->
+    <div class="modal-preview-wrap">
+      <div class="section-label" style="margin-bottom:8px;">Vista previa</div>
+      <div class="preview-scroll">
+        <table class="preview-table" id="previewTable"></table>
+      </div>
+    </div>
 
-<!-- PARAMETRO N -->
-<label>N (Promedio móvil):</label>
-<input type="number" id="nValue" value="3">
-<button onclick="runForecast()">Ejecutar</button>
+    <!-- SELECTS -->
+    <div class="modal-selects">
+      <div class="modal-field">
+        <label class="modal-label">Columna de <span style="color:var(--accent2)">producto</span></label>
+        <div class="modal-hint">La que identifica cada serie (ej: nombre, SKU). Deja en "Ninguna" si tu CSV tiene solo una serie.</div>
+        <select class="modal-select" id="colProduct">
+          <option value="">— Ninguna (serie única) —</option>
+        </select>
+      </div>
+      <div class="modal-field">
+        <label class="modal-label">Columna de <span style="color:var(--accent)">valor</span> <span style="color:var(--down)">*</span></label>
+        <div class="modal-hint">La columna numérica que se va a pronosticar (ej: ventas, demanda).</div>
+        <select class="modal-select" id="colValue"></select>
+      </div>
+    </div>
 
-<!-- RESULTADOS -->
-<div id="results"></div>
+    <div class="modal-actions">
+      <button class="modal-cancel" onclick="closeModal()">Cancelar</button>
+      <button class="modal-confirm" onclick="confirmColumns()">✓ Confirmar y cargar</button>
+    </div>
+  </div>
+</div>
 
-<!-- GRÁFICO -->
-<canvas id="myChart"></canvas>
+<!-- MAIN -->
+<div class="main">
 
-<!-- LIBRERÍA CHART -->
+  <!-- ── SIDEBAR ── -->
+  <div class="sidebar">
+
+    <!-- CARGAR CSV -->
+    <div class="sidebar-section">
+      <div class="section-label">Cargar datos</div>
+      <label class="upload-area" id="uploadArea">
+        <input type="file" id="fileInput" accept=".csv" onchange="uploadFile(this)">
+        <span class="upload-icon">📂</span>
+        <span class="upload-text" id="uploadText">Seleccionar CSV</span>
+        <span class="upload-sub">Separado por comas</span>
+      </label>
+    </div>
+
+    <!-- TIPO DE PRONÓSTICO -->
+    <div class="sidebar-section">
+      <div class="section-label">Método de pronóstico</div>
+      <div class="method-group">
+
+        <button class="method-btn active" data-method="moving_average" onclick="selectMethod(this)">
+          <div class="btn-icon">📈</div>
+          <div class="btn-label">
+            Promedio Móvil
+            <span class="btn-sub">Media de N períodos</span>
+          </div>
+        </button>
+
+        <button class="method-btn" data-method="double_exp" onclick="selectMethod(this)">
+          <div class="btn-icon">〰️</div>
+          <div class="btn-label">
+            Suav. Exp. Doble
+            <span class="btn-sub">Nivel + tendencia (Holt)</span>
+          </div>
+        </button>
+
+        <button class="method-btn" data-method="winters" onclick="selectMethod(this)">
+          <div class="btn-icon">❄️</div>
+          <div class="btn-label">
+            Winters
+            <span class="btn-sub">Tendencia + estacionalidad</span>
+          </div>
+        </button>
+
+        <button class="method-btn" data-method="prophet" onclick="selectMethod(this)">
+          <div class="btn-icon">🔮</div>
+          <div class="btn-label">
+            Prophet
+            <span class="btn-sub">Modelo aditivo (Meta)</span>
+          </div>
+        </button>
+
+      </div>
+
+      <!-- Parámetros Promedio Móvil -->
+      <div class="param-box" id="paramMA">
+        <div class="param-row">
+          <label class="param-label">N (ventana)</label>
+          <input type="number" class="param-input" id="nValue" value="3" min="1">
+        </div>
+      </div>
+
+      <!-- Parámetros Suavización Exponencial Doble -->
+      <div class="param-box hidden" id="paramDoubleExp">
+        <div class="param-row">
+          <label class="param-label">Horizonte futuro</label>
+          <input type="number" class="param-input" id="horizonDoubleExp" value="6" min="1">
+        </div>
+      </div>
+
+      <!-- Parámetros Winters -->
+      <div class="param-box hidden" id="paramWinters">
+        <div class="param-row">
+          <label class="param-label">Estacionalidad</label>
+          <input type="number" class="param-input" id="seasonalValue" value="4" min="2"
+                 title="Períodos por ciclo: 4=trimestral, 12=mensual">
+        </div>
+        <div class="param-row">
+          <label class="param-label">Horizonte futuro</label>
+          <input type="number" class="param-input" id="horizonValue" value="6" min="1">
+        </div>
+      </div>
+
+      <!-- Parámetros Prophet -->
+      <div class="param-box hidden" id="paramProphet">
+        <div class="param-row">
+          <label class="param-label">Horizonte futuro</label>
+          <input type="number" class="param-input" id="horizonProphet" value="6" min="1">
+        </div>
+      </div>
+    </div>
+
+    <!-- SELECCIÓN DE PRODUCTO -->
+    <div class="sidebar-section">
+      <div class="section-label">Producto</div>
+      <div class="product-search">
+        <span class="search-icon">🔍</span>
+        <input type="text" placeholder="Buscar..." oninput="filterProducts(this.value)" id="productSearch">
+      </div>
+      <div class="product-list" id="productList">
+        <div class="product-empty">Carga un CSV para ver los productos</div>
+      </div>
+    </div>
+
+    <!-- BOTÓN EJECUTAR -->
+    <button class="run-btn" id="runBtn" onclick="runForecast()">
+      ▶ Ejecutar pronóstico
+    </button>
+
+  </div>
+  <!-- ── FIN SIDEBAR ── -->
+
+  <!-- ── CONTENT ── -->
+  <div class="content">
+
+    <!-- TABS -->
+    <div class="tab-bar">
+      <button class="tab-btn active" data-tab="forecast" onclick="switchTab(this)">
+        📊 Pronóstico
+      </button>
+      <button class="tab-btn" data-tab="compare" onclick="switchTab(this)">
+        ⚖️ Comparar métodos
+      </button>
+    </div>
+
+    <!-- ─── TAB: PRONÓSTICO ─── -->
+    <div id="tab-forecast" class="tab-panel active">
+
+      <!-- KPIs -->
+      <div class="kpi-row">
+        <div class="kpi-card yellow">
+          <div class="kpi-label">Próximo período</div>
+          <div class="kpi-value" id="kpi-next">—</div>
+          <div class="kpi-sub" id="kpi-next-sub">Sin datos</div>
+        </div>
+        <div class="kpi-card green">
+          <div class="kpi-label">MAPE</div>
+          <div class="kpi-value" id="kpi-mape">—</div>
+          <div class="kpi-sub">Error porcentual medio</div>
+        </div>
+        <div class="kpi-card cyan">
+          <div class="kpi-label">RMSE</div>
+          <div class="kpi-value" id="kpi-rmse">—</div>
+          <div class="kpi-sub">Raíz del error cuadrático</div>
+        </div>
+        <div class="kpi-card pink">
+          <div class="kpi-label">MAE</div>
+          <div class="kpi-value" id="kpi-mae">—</div>
+          <div class="kpi-sub">Error absoluto medio</div>
+        </div>
+      </div>
+
+      <!-- GRÁFICO + PANEL DERECHO -->
+      <div class="bottom-row">
+
+        <!-- GRÁFICO -->
+        <div class="chart-card">
+          <div class="card-header">
+            <div>
+              <div class="card-title" id="chartTitle">Selecciona un producto y ejecuta</div>
+              <div class="card-subtitle" id="chartSubtitle">—</div>
+            </div>
+            <div class="legend">
+              <div class="legend-item">
+                <div class="legend-line" style="background:var(--accent2)"></div> Histórico
+              </div>
+              <div class="legend-item">
+                <div class="legend-line dashed"></div> Pronóstico
+              </div>
+              <div class="legend-item" id="legendFuture" style="display:none">
+                <div class="legend-line" style="background:var(--accent3)"></div> Futuro
+              </div>
+            </div>
+          </div>
+          <div class="chart-wrap">
+            <canvas id="myChart"></canvas>
+          </div>
+        </div>
+
+        <!-- PANEL MÉTRICAS -->
+        <div class="side-panel">
+
+          <div class="mini-card">
+            <div class="card-title" style="font-size:13px;">Métricas de error</div>
+            <div class="metrics-wrap" id="metricsWrap">
+              <div class="metric-empty">Sin resultados aún</div>
+            </div>
+          </div>
+
+          <div class="mini-card">
+            <div class="card-title" style="font-size:13px;">Valores proyectados</div>
+            <table class="conf-table">
+              <thead>
+                <tr><th>Período</th><th>Valor</th></tr>
+              </thead>
+              <tbody id="futureTable">
+                <tr><td colspan="2" style="color:var(--text-dim);text-align:center;padding-top:10px;">—</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="mini-card" id="infoCard">
+            <div class="card-title" style="font-size:13px;">Información</div>
+            <div style="margin-top:10px;display:flex;flex-direction:column;gap:8px;" id="infoPanel">
+              <div class="factor-row">
+                <span class="factor-label">Producto</span>
+                <span class="factor-val" id="info-product" style="color:var(--accent2)">—</span>
+              </div>
+              <div class="factor-row">
+                <span class="factor-label">Método</span>
+                <span class="factor-val" id="info-method" style="color:var(--accent)">—</span>
+              </div>
+              <div class="factor-row">
+                <span class="factor-label">Observaciones</span>
+                <span class="factor-val" id="info-ndata" style="color:var(--text-muted)">—</span>
+              </div>
+              <div class="factor-row">
+                <span class="factor-label">MSE</span>
+                <span class="factor-val" id="info-mse" style="color:var(--text-muted)">—</span>
+              </div>
+              <div class="factor-row">
+                <span class="factor-label">MAPE'</span>
+                <span class="factor-val" id="info-mape-prima" style="color:var(--text-muted)">—</span>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+    <!-- ─── FIN TAB PRONÓSTICO ─── -->
+
+    <!-- ─── TAB: COMPARAR ─── -->
+    <div id="tab-compare" class="tab-panel" style="display:none;">
+
+      <div class="compare-header">
+        <div>
+          <div class="card-title" id="compareTitle">Comparación de métodos</div>
+          <div class="card-subtitle" id="compareSubtitle">Ejecuta un pronóstico primero para comparar</div>
+        </div>
+        <button class="run-compare-btn" id="runCompareBtn" onclick="runCompare()">
+          ⚖️ Comparar todos
+        </button>
+      </div>
+
+      <!-- TABLA COMPARACIÓN DE MÉTRICAS -->
+      <div class="compare-card">
+        <div class="card-title" style="font-size:13px;margin-bottom:14px;">Indicadores de error por método</div>
+        <div id="compareTableWrap">
+          <div class="metric-empty">Sin datos de comparación</div>
+        </div>
+      </div>
+
+      <!-- GRÁFICO COMPARATIVO DE PRÓXIMO PERÍODO -->
+      <div class="compare-bottom-row">
+        <div class="compare-card flex-chart">
+          <div class="card-header">
+            <div>
+              <div class="card-title" style="font-size:13px;">Pronóstico siguiente período por método</div>
+              <div class="card-subtitle" id="compareChartSub">—</div>
+            </div>
+          </div>
+          <div class="chart-wrap" style="min-height:160px;">
+            <canvas id="compareBarChart"></canvas>
+          </div>
+        </div>
+
+        <div class="compare-card flex-table">
+          <div class="card-title" style="font-size:13px;margin-bottom:12px;">Proyección futura comparada</div>
+          <div id="compareFutureWrap">
+            <div class="metric-empty">Sin datos</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+    <!-- ─── FIN TAB COMPARAR ─── -->
+
+  </div>
+  <!-- ── FIN CONTENT ── -->
+
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-
 <script>
-let chart = null;
+// ── ESTADO ──
+const state = {
+  method:  "moving_average",
+  product: null,
+  lastResult: null,
+};
 
-// -----------------------------
-// SUBIR ARCHIVO
-// -----------------------------
-function uploadFile() {
-    let file = document.getElementById("fileInput").files[0];
+let chart        = null;
+let compareChart = null;
 
-    if (!file) {
-        alert("Selecciona un archivo primero");
-        return;
+// ── COLORES PARA PRODUCTOS ──
+const COLORS = ['#5aebff','#e8ff5a','#ff5a8a','#3dffa8','#a05aff','#ffaa5a','#ff5a5a'];
+
+const METHOD_LABELS = {
+  moving_average: "Prom. Móvil",
+  double_exp:     "Suav. Exp. Doble",
+  winters:        "Winters",
+  prophet:        "Prophet",
+};
+
+const METHOD_COLORS = {
+  moving_average: "#5aebff",
+  double_exp:     "#e8ff5a",
+  winters:        "#ff5a8a",
+  prophet:        "#3dffa8",
+};
+
+// ── UPLOAD CSV ──
+let _uploadMeta = null; // guardamos la respuesta del servidor para usar en el modal
+
+async function uploadFile(input) {
+  const file = input.files[0];
+  if (!file) return;
+
+  document.getElementById("uploadText").textContent = file.name;
+  document.getElementById("uploadArea").classList.add("loaded");
+  setStatus("Leyendo archivo...", false);
+
+  const formData = new FormData();
+  formData.append("file", file);
+
+  try {
+    const res  = await fetch("/upload", { method: "POST", body: formData });
+    const data = await res.json();
+
+    if (data.error) {
+      alert("Error: " + data.error);
+      setStatus("Error de carga", false);
+      return;
     }
 
-    let formData = new FormData();
-    formData.append("file", file);
+    _uploadMeta = data;
+    openColumnModal(data);
 
-    fetch("/upload", {
-        method: "POST",
-        body: formData
-    })
-    .then(res => res.json())
-    .then(data => {
-        alert(data.message);
-    })
-    .catch(error => {
-        console.error("Error:", error);
-    });
+  } catch (e) {
+    alert("Error al cargar el archivo: " + e.message);
+    setStatus("Error de carga", false);
+  }
 }
 
-// -----------------------------
-// EJECUTAR PRONÓSTICO
-// -----------------------------
-function runForecast() {
-    let n = document.getElementById("nValue").value;
+// ── MODAL: ABRIR ──
+function openColumnModal(meta) {
+  document.getElementById("modalSub").textContent =
+    `${meta.total_rows} filas · ${meta.all_columns.length} columnas detectadas`;
 
-    fetch("/forecast", {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json"
+  // Poblar selects
+  const selProd  = document.getElementById("colProduct");
+  const selValue = document.getElementById("colValue");
+  selProd.innerHTML  = '<option value="">— Ninguna (serie única) —</option>';
+  selValue.innerHTML = "";
+
+  meta.all_columns.forEach(col => {
+    const opt = document.createElement("option");
+    opt.value = col; opt.textContent = col;
+    selProd.appendChild(opt.cloneNode(true));
+  });
+
+  meta.numeric_columns.forEach(col => {
+    const opt = document.createElement("option");
+    opt.value = col; opt.textContent = col;
+    selValue.appendChild(opt);
+  });
+
+  // Aplicar sugerencias
+  if (meta.suggested_product) selProd.value  = meta.suggested_product;
+  if (meta.suggested_value)   selValue.value = meta.suggested_value;
+
+  // Construir tabla de preview
+  buildPreviewTable(meta.preview, meta.all_columns);
+
+  document.getElementById("colModal").style.display = "flex";
+}
+
+function buildPreviewTable(rows, cols) {
+  const table = document.getElementById("previewTable");
+  let html = "<thead><tr>" + cols.map(c => `<th>${c}</th>`).join("") + "</tr></thead><tbody>";
+  rows.forEach(row => {
+    html += "<tr>" + cols.map(c => `<td>${row[c] ?? ""}</td>`).join("") + "</tr>";
+  });
+  html += "</tbody>";
+  table.innerHTML = html;
+}
+
+function closeModal() {
+  document.getElementById("colModal").style.display = "none";
+  // Resetear input de archivo para que pueda seleccionarse el mismo archivo de nuevo
+  document.getElementById("fileInput").value = "";
+  document.getElementById("uploadText").textContent = "Seleccionar CSV";
+  document.getElementById("uploadArea").classList.remove("loaded");
+  setStatus("Sin datos", false);
+}
+
+// ── MODAL: CONFIRMAR COLUMNAS ──
+async function confirmColumns() {
+  const productCol = document.getElementById("colProduct").value || null;
+  const valueCol   = document.getElementById("colValue").value;
+
+  if (!valueCol) { alert("Debes seleccionar una columna de valor."); return; }
+
+  const btn = document.querySelector(".modal-confirm");
+  btn.textContent = "⏳ Cargando...";
+  btn.disabled    = true;
+
+  try {
+    const res  = await fetch("/configure", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ product_col: productCol, value_col: valueCol }),
+    });
+    const data = await res.json();
+
+    if (data.error) {
+      alert("Error: " + data.error);
+      btn.textContent = "✓ Confirmar y cargar";
+      btn.disabled = false;
+      return;
+    }
+
+    document.getElementById("colModal").style.display = "none";
+    setStatus(`${data.total_rows} filas · ${data.products.length} producto(s)`, true);
+    renderProductList(data.products);
+
+  } catch (e) {
+    alert("Error: " + e.message);
+  } finally {
+    btn.textContent = "✓ Confirmar y cargar";
+    btn.disabled    = false;
+  }
+}
+
+// ── RENDERIZAR LISTA DE PRODUCTOS ──
+function renderProductList(products) {
+  const list = document.getElementById("productList");
+  list.innerHTML = "";
+
+  products.forEach((name, i) => {
+    const div = document.createElement("div");
+    div.className = "product-item";
+    div.dataset.name = name;
+    div.innerHTML = `
+      <div class="product-dot" style="background:${COLORS[i % COLORS.length]}"></div>
+      <div class="product-name">${name}</div>
+    `;
+    div.onclick = () => selectProduct(div, name);
+    list.appendChild(div);
+  });
+
+  if (products.length > 0) {
+    list.firstChild.click();
+  }
+}
+
+function selectProduct(el, name) {
+  document.querySelectorAll(".product-item").forEach(i => i.classList.remove("active"));
+  el.classList.add("active");
+  state.product = name;
+}
+
+function filterProducts(q) {
+  document.querySelectorAll(".product-item").forEach(item => {
+    const match = item.dataset.name.toLowerCase().includes(q.toLowerCase());
+    item.style.display = match ? "" : "none";
+  });
+}
+
+// ── SELECCIÓN DE MÉTODO ──
+function selectMethod(btn) {
+  document.querySelectorAll(".method-btn").forEach(b => b.classList.remove("active"));
+  btn.classList.add("active");
+  state.method = btn.dataset.method;
+
+  document.getElementById("paramMA").classList.toggle("hidden",        state.method !== "moving_average");
+  document.getElementById("paramDoubleExp").classList.toggle("hidden", state.method !== "double_exp");
+  document.getElementById("paramWinters").classList.toggle("hidden",   state.method !== "winters");
+  document.getElementById("paramProphet").classList.toggle("hidden",   state.method !== "prophet");
+}
+
+// ── TABS ──
+function switchTab(btn) {
+  document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+  btn.classList.add("active");
+
+  const tab = btn.dataset.tab;
+  document.querySelectorAll(".tab-panel").forEach(p => p.style.display = "none");
+  document.getElementById("tab-" + tab).style.display = "flex";
+  document.getElementById("tab-" + tab).style.flexDirection = "column";
+}
+
+// ── EJECUTAR PRONÓSTICO ──
+async function runForecast() {
+  if (!state.product) { alert("Selecciona un producto primero."); return; }
+
+  const btn = document.getElementById("runBtn");
+  btn.textContent = "⏳ Calculando...";
+  btn.disabled = true;
+  btn.style.opacity = "0.7";
+
+  const body = {
+    product:  state.product,
+    method:   state.method,
+    n:        parseInt(document.getElementById("nValue").value)          || 3,
+    seasonal: parseInt(document.getElementById("seasonalValue").value)   || 4,
+    horizon:  parseInt(
+      state.method === "winters"    ? document.getElementById("horizonValue").value :
+      state.method === "double_exp" ? document.getElementById("horizonDoubleExp").value :
+      state.method === "prophet"    ? document.getElementById("horizonProphet").value :
+      "6"
+    ) || 6,
+  };
+
+  try {
+    const res  = await fetch("/forecast", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+
+    if (data.error) {
+      alert("Error: " + data.error);
+      resetBtn(btn);
+      return;
+    }
+
+    state.lastResult = data;
+    updateDashboard(data);
+
+    btn.textContent  = "✓ Listo";
+    btn.style.background = "var(--up)";
+    setTimeout(() => { btn.innerHTML = "▶ Ejecutar pronóstico"; btn.style.background = "var(--accent)"; btn.style.opacity = "1"; btn.disabled = false; }, 2000);
+
+  } catch (e) {
+    alert("Error de conexión: " + e.message);
+    resetBtn(btn);
+  }
+}
+
+function resetBtn(btn) {
+  btn.innerHTML = "▶ Ejecutar pronóstico";
+  btn.style.background = "var(--accent)";
+  btn.style.opacity = "1";
+  btn.disabled = false;
+}
+
+// ── ACTUALIZAR DASHBOARD ──
+function updateDashboard(data) {
+  const e = data.errors;
+  const methodName = METHOD_LABELS[data.method] || data.method;
+
+  document.getElementById("kpi-next").textContent   = data.next?.toLocaleString("es-CO") ?? "—";
+  document.getElementById("kpi-next-sub").textContent = `Próximo período`;
+  document.getElementById("kpi-mape").textContent   = (e.MAPE * 100).toFixed(2) + "%";
+  document.getElementById("kpi-rmse").textContent   = e.RMSE.toLocaleString("es-CO");
+  document.getElementById("kpi-mae").textContent    = e.MAE.toLocaleString("es-CO");
+
+  document.getElementById("chartTitle").textContent  = `${data.product} — ${methodName}`;
+  document.getElementById("chartSubtitle").textContent = `${data.n_data} observaciones · Siguiente período: ${data.next?.toLocaleString("es-CO")}`;
+
+  drawChart(data);
+  renderMetrics(e);
+  renderFutureTable(data.future, data.future_labels);
+
+  document.getElementById("info-product").textContent    = data.product;
+  document.getElementById("info-method").textContent     = methodName;
+  document.getElementById("info-ndata").textContent      = data.n_data + " obs.";
+  document.getElementById("info-mse").textContent        = e.MSE;
+  document.getElementById("info-mape-prima").textContent = (e.MAPE_prima * 100).toFixed(2) + "%";
+
+  document.getElementById("legendFuture").style.display =
+    data.future && data.future.length > 1 ? "flex" : "none";
+}
+
+// ── DIBUJAR GRÁFICO ──
+function drawChart(data) {
+  const ctx = document.getElementById("myChart").getContext("2d");
+  if (chart) chart.destroy();
+
+  const histLen   = data.real.length;
+  const futureLen = (data.future || []).length;
+
+  const histLabels   = data.real.map((_, i) => i + 1);
+  const futureLabels = data.future_labels || [];
+  const labels       = [...histLabels, ...futureLabels];
+
+  const realSeries  = [...data.real, ...Array(futureLen).fill(null)];
+  const fcastClean  = (data.forecast || []).map(v => (v === "" || v === null) ? null : v);
+  const fcastSeries = [...fcastClean, ...Array(futureLen).fill(null)];
+  const futureSeries = [...Array(histLen).fill(null), ...(data.future || [])];
+
+  chart = new Chart(ctx, {
+    type: "line",
+    data: {
+      labels,
+      datasets: [
+        {
+          label: "Histórico",
+          data: realSeries,
+          borderColor: "#5aebff",
+          backgroundColor: "rgba(90,235,255,0.06)",
+          borderWidth: 2,
+          pointRadius: 3,
+          pointBackgroundColor: "#5aebff",
+          tension: 0.4,
+          fill: true,
         },
-        body: JSON.stringify({ n: n })
-    })
-    .then(res => res.json())
-    .then(data => {
-
-        if (data.error) {
-            alert(data.error);
-            return;
+        {
+          label: "Pronóstico",
+          data: fcastSeries,
+          borderColor: "#e8ff5a",
+          borderWidth: 2,
+          borderDash: [6, 4],
+          pointRadius: 3,
+          pointBackgroundColor: "#e8ff5a",
+          tension: 0.4,
+          fill: false,
+          spanGaps: false,
+        },
+        {
+          label: "Futuro",
+          data: futureSeries,
+          borderColor: "#ff5a8a",
+          backgroundColor: "rgba(255,90,138,0.07)",
+          borderWidth: 2,
+          pointRadius: 4,
+          pointBackgroundColor: "#ff5a8a",
+          tension: 0.4,
+          fill: true,
+        },
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: "index", intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: "#1e2127",
+          borderColor: "#2a2d35",
+          borderWidth: 1,
+          titleColor: "#7a8090",
+          bodyColor: "#f0f2f5",
+          titleFont:  { family: "monospace", size: 10 },
+          bodyFont:   { family: "monospace", size: 12 },
+          callbacks: {
+            label: ctx => ctx.parsed.y != null
+              ? `  ${ctx.dataset.label}: ${ctx.parsed.y.toLocaleString("es-CO")}`
+              : null
+          }
         }
-
-        // Mostrar métricas
-        let html = `
-            <h2>Resultados</h2>
-            <p>MAPE: ${data.errors.MAPE}</p>
-            <p>MAPE': ${data.errors.MAPE_prima}</p>
-            <p>MSE: ${data.errors.MSE}</p>
-            <p>MAE: ${data.errors.MAE}</p>
-            <p>RMSE: ${data.errors.RMSE}</p>
-        `;
-
-        document.getElementById("results").innerHTML = html;
-
-        // Dibujar gráfico
-        drawChart(data.real, data.forecast);
-    })
-    .catch(error => {
-        console.error("Error:", error);
-    });
+      },
+      scales: {
+        x: {
+          grid:   { color: "#1e2127" },
+          ticks:  { color: "#4a5060", font: { size: 10 }, maxTicksLimit: 12 },
+          border: { color: "#2a2d35" }
+        },
+        y: {
+          grid:   { color: "#1e2127" },
+          ticks:  { color: "#4a5060", font: { size: 10 }, callback: v => v.toLocaleString("es-CO") },
+          border: { color: "#2a2d35" }
+        }
+      }
+    }
+  });
 }
 
-// -----------------------------
-// GRAFICAR
-// -----------------------------
-function drawChart(real, forecast) {
+// ── MÉTRICAS LATERALES ──
+function renderMetrics(e) {
+  const metrics = [
+    { name: "MAPE",    value: (e.MAPE       * 100).toFixed(2) + "%", pct: Math.max(0, 100 - e.MAPE       * 100 * 5) },
+    { name: "MAPE'",   value: (e.MAPE_prima * 100).toFixed(2) + "%", pct: Math.max(0, 100 - e.MAPE_prima * 100 * 5) },
+    { name: "RMSE",    value: e.RMSE,                                  pct: Math.max(0, 100 - Math.min(e.RMSE, 100)) },
+    { name: "MAE",     value: e.MAE,                                   pct: Math.max(0, 100 - Math.min(e.MAE,  100)) },
+    { name: "MSE",     value: e.MSE,                                   pct: Math.max(0, 100 - Math.min(Math.sqrt(e.MSE), 100)) },
+  ];
 
-    const ctx = document.getElementById("myChart").getContext("2d");
+  const cls = pct => pct >= 88 ? "good" : pct >= 65 ? "warn" : "bad";
 
-    let labels = real.map((_, i) => i + 1);
-    let cleanForecast = forecast.map(v => v === "" ? null : v);
+  document.getElementById("metricsWrap").innerHTML = metrics.map(m => `
+    <div class="acc-row">
+      <span class="acc-label">${m.name}</span>
+      <span class="acc-val ${cls(m.pct)}">${typeof m.value === "number" ? m.value.toLocaleString("es-CO") : m.value}</span>
+    </div>
+    <div class="bar-track"><div class="bar-fill ${cls(m.pct)}" style="width:${Math.round(m.pct)}%"></div></div>
+  `).join("");
+}
 
-    // destruir gráfico anterior
-    if (chart) {
-        chart.destroy();
+// ── TABLA FUTUROS ──
+function renderFutureTable(future, labels) {
+  if (!future || future.length === 0) {
+    document.getElementById("futureTable").innerHTML =
+      '<tr><td colspan="2" style="color:var(--text-dim);text-align:center">—</td></tr>';
+    return;
+  }
+  document.getElementById("futureTable").innerHTML = future.map((v, i) => `
+    <tr>
+      <td>${labels?.[i] ?? "+" + (i + 1)}</td>
+      <td>${typeof v === "number" ? v.toLocaleString("es-CO") : v}</td>
+    </tr>
+  `).join("");
+}
+
+// ── EJECUTAR COMPARACIÓN ──
+async function runCompare() {
+  if (!state.product) { alert("Selecciona un producto primero."); return; }
+
+  const btn = document.getElementById("runCompareBtn");
+  btn.textContent = "⏳ Comparando...";
+  btn.disabled    = true;
+
+  const body = {
+    product:  state.product,
+    n:        parseInt(document.getElementById("nValue").value)        || 3,
+    seasonal: parseInt(document.getElementById("seasonalValue").value) || 4,
+    horizon:  parseInt(
+      state.method === "winters"    ? document.getElementById("horizonValue").value :
+      state.method === "double_exp" ? document.getElementById("horizonDoubleExp").value :
+      state.method === "prophet"    ? document.getElementById("horizonProphet").value :
+      "6"
+    ) || 6,
+  };
+
+  try {
+    const res  = await fetch("/compare", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+
+    if (data.error) { alert("Error: " + data.error); btn.textContent = "⚖️ Comparar todos"; btn.disabled = false; return; }
+
+    renderComparison(data);
+
+    btn.textContent = "✓ Comparación lista";
+    btn.style.background = "var(--up)";
+    btn.style.color = "#0e0f11";
+    setTimeout(() => { btn.textContent = "⚖️ Comparar todos"; btn.style.background = ""; btn.style.color = ""; btn.disabled = false; }, 2500);
+
+  } catch (e) {
+    alert("Error de conexión: " + e.message);
+    btn.textContent = "⚖️ Comparar todos";
+    btn.disabled = false;
+  }
+}
+
+// ── RENDERIZAR COMPARACIÓN ──
+function renderComparison(data) {
+  const methods  = data.methods;
+  const product  = data.product;
+  const methKeys = Object.keys(methods);
+
+  document.getElementById("compareTitle").textContent   = `Comparación — ${product}`;
+  document.getElementById("compareSubtitle").textContent = `${methKeys.length} métodos evaluados`;
+
+  // ── TABLA DE MÉTRICAS ──
+  const metricCols = ["MAPE", "MAPE_prima", "MAE", "RMSE", "MSE"];
+  const metricLabels = { MAPE: "MAPE", MAPE_prima: "MAPE'", MAE: "MAE", RMSE: "RMSE", MSE: "MSE" };
+
+  // Para cada métrica, encontrar el mejor (menor valor)
+  const bestMethod = {};
+  metricCols.forEach(mk => {
+    let best = null, bestVal = Infinity;
+    methKeys.forEach(m => {
+      if (!methods[m].error) {
+        const v = methods[m].errors[mk];
+        if (v < bestVal) { bestVal = v; best = m; }
+      }
+    });
+    bestMethod[mk] = best;
+  });
+
+  let tableHtml = `
+    <table class="compare-table">
+      <thead>
+        <tr>
+          <th>Método</th>
+          ${metricCols.map(mk => `<th>${metricLabels[mk]}</th>`).join("")}
+          <th>Siguiente</th>
+        </tr>
+      </thead>
+      <tbody>
+  `;
+
+  methKeys.forEach(m => {
+    const r = methods[m];
+    const isCurrent = m === state.method;
+
+    if (r.error) {
+      tableHtml += `
+        <tr class="compare-row ${isCurrent ? "current-method" : ""}">
+          <td><span class="method-tag" style="background:${METHOD_COLORS[m]}22;color:${METHOD_COLORS[m]};border-color:${METHOD_COLORS[m]}44;">${METHOD_LABELS[m]}</span></td>
+          <td colspan="${metricCols.length + 1}" style="color:var(--text-dim);font-size:11px;">${r.error}</td>
+        </tr>`;
+      return;
     }
 
-    chart = new Chart(ctx, {
-        type: "line",
-        data: {
-            labels: labels,
-            datasets: [
-                {
-                    label: "Datos históricos",
-                    data: real,
-                    borderWidth: 2
-                },
-                {
-                    label: "Pronóstico (Promedio móvil)",
-                    data: cleanForecast,
-                    borderDash: [5, 5],
-                    borderWidth: 2
-                }
-            ]
-        }
+    tableHtml += `<tr class="compare-row ${isCurrent ? "current-method" : ""}">`;
+    tableHtml += `<td><span class="method-tag" style="background:${METHOD_COLORS[m]}22;color:${METHOD_COLORS[m]};border-color:${METHOD_COLORS[m]}44;">${METHOD_LABELS[m]}</span></td>`;
+
+    metricCols.forEach(mk => {
+      const val = r.errors[mk];
+      const isBest = bestMethod[mk] === m;
+      const displayVal = (mk === "MAPE" || mk === "MAPE_prima")
+        ? (val * 100).toFixed(2) + "%"
+        : val.toLocaleString("es-CO");
+      tableHtml += `<td class="${isBest ? "best-cell" : ""}">${isBest ? "⭐ " : ""}${displayVal}</td>`;
     });
+
+    tableHtml += `<td style="color:var(--accent2);font-weight:600;">${r.next?.toLocaleString("es-CO") ?? "—"}</td>`;
+    tableHtml += `</tr>`;
+  });
+
+  tableHtml += `</tbody></table>`;
+  document.getElementById("compareTableWrap").innerHTML = tableHtml;
+
+  // ── GRÁFICO BARRAS: PRONÓSTICO SIGUIENTE PERÍODO ──
+  const validMethods  = methKeys.filter(m => !methods[m].error);
+  const barLabels     = validMethods.map(m => METHOD_LABELS[m]);
+  const barValues     = validMethods.map(m => methods[m].next);
+  const barColors     = validMethods.map(m => METHOD_COLORS[m]);
+  const barBorders    = validMethods.map(m => METHOD_COLORS[m]);
+
+  document.getElementById("compareChartSub").textContent =
+    `Pronóstico para el período +1 · ${product}`;
+
+  const ctx2 = document.getElementById("compareBarChart").getContext("2d");
+  if (compareChart) compareChart.destroy();
+
+  compareChart = new Chart(ctx2, {
+    type: "bar",
+    data: {
+      labels: barLabels,
+      datasets: [{
+        data:            barValues,
+        backgroundColor: barColors.map(c => c + "33"),
+        borderColor:     barBorders,
+        borderWidth: 2,
+        borderRadius: 6,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: "#1e2127",
+          borderColor: "#2a2d35",
+          borderWidth: 1,
+          titleColor: "#7a8090",
+          bodyColor: "#f0f2f5",
+          titleFont: { family: "monospace", size: 10 },
+          bodyFont:  { family: "monospace", size: 12 },
+          callbacks: { label: ctx => `  Pronóstico: ${ctx.parsed.y.toLocaleString("es-CO")}` }
+        }
+      },
+      scales: {
+        x: { grid: { color: "#1e2127" }, ticks: { color: "#7a8090", font: { size: 11 } }, border: { color: "#2a2d35" } },
+        y: { grid: { color: "#1e2127" }, ticks: { color: "#4a5060", font: { size: 10 }, callback: v => v.toLocaleString("es-CO") }, border: { color: "#2a2d35" } }
+      }
+    }
+  });
+
+  // ── TABLA PROYECCIÓN FUTURA COMPARADA ──
+  const horizonLen = Math.max(...validMethods.map(m => (methods[m].future || []).length));
+  let futHtml = `
+    <table class="compare-table small">
+      <thead>
+        <tr>
+          <th>Per.</th>
+          ${validMethods.map(m => `<th style="color:${METHOD_COLORS[m]}">${METHOD_LABELS[m]}</th>`).join("")}
+        </tr>
+      </thead>
+      <tbody>
+  `;
+  for (let i = 0; i < horizonLen; i++) {
+    futHtml += `<tr>`;
+    futHtml += `<td style="color:var(--text-dim)">+${i+1}</td>`;
+    validMethods.forEach(m => {
+      const val = (methods[m].future || [])[i];
+      futHtml += `<td>${val != null ? val.toLocaleString("es-CO") : "—"}</td>`;
+    });
+    futHtml += `</tr>`;
+  }
+  futHtml += `</tbody></table>`;
+  document.getElementById("compareFutureWrap").innerHTML = futHtml;
+}
+
+// ── STATUS BADGE ──
+function setStatus(text, active) {
+  const badge = document.getElementById("statusBadge");
+  badge.querySelector(".dot").style.background = active ? "var(--up)" : "var(--accent3)";
+  badge.childNodes[1].textContent = " " + text;
 }
 </script>
-
 </body>
 </html>
